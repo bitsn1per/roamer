@@ -1,8 +1,10 @@
 # Roamer
 
-[![CI](https://github.com/backfield79/roamer/actions/workflows/ci.yml/badge.svg)](https://github.com/backfield79/roamer/actions/workflows/ci.yml)
+[![CI](https://github.com/bitsn1per/roamer/actions/workflows/ci.yml/badge.svg)](https://github.com/bitsn1per/roamer/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![OpenWrt 24.10 | 25.12](https://img.shields.io/badge/OpenWrt-24.10%20%7C%2025.12-00B5E2)
+
+> This is a fork of [backfield79/roamer](https://github.com/backfield79/roamer).
 
 **One Wi-Fi network across all your OpenWrt routers.** Roamer sets up 802.11r fast transition,
 802.11k/v and [usteer](https://openwrt.org/docs/guide-user/network/wifi/usteer) client steering on
@@ -28,7 +30,7 @@ assumed.
 ## Quick start
 
 ```sh
-git clone https://github.com/backfield79/roamer.git && cd roamer
+git clone https://github.com/bitsn1per/roamer.git && cd roamer
 ./roaming-setup.sh
 ```
 
