@@ -1,5 +1,5 @@
 #!/bin/sh
-# Roamer — seamless Wi-Fi roaming for OpenWrt: 802.11r (FT) + 802.11k/v + usteer.        v8.5
+# Roamer — seamless Wi-Fi roaming for OpenWrt: 802.11r (FT) + 802.11k/v + usteer.        v8.6
 # https://github.com/OWNER/roamer · MIT License · POSIX sh / busybox ash
 # Works on any OpenWrt 24.10/25.12 router with a 2.4 and/or 5 GHz radio. Docs: README.md, docs/
 #
@@ -24,7 +24,7 @@
 #   DRY_RUN=1  ASSUME_YES=1  GUARD=0  PING_HOST 1.1.1.1  WIFI_WAIT <s>  CLEAR=0  NO_COLOR=1  COLS <n>
 set -eu
 
-VERSION=8.5
+VERSION=8.6
 NAME_SET=0; [ -n "${NAME+x}" ] && NAME_SET=1
 TS="$(date +%Y%m%d-%H%M%S)"
 DRY_RUN="${DRY_RUN:-0}"; GUARD="${GUARD:-1}"; PING_HOST="${PING_HOST:-1.1.1.1}"

@@ -3,6 +3,22 @@
 All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow `VERSION` in `roaming-setup.sh`.
 
+## [8.6] — 2026-11-02
+
+### Added
+- **Optional monitoring** (`MONITORING=yes|no`, default no; `MON_PORT`, default 25826): LuCI Statistics graphs of
+  Wi-Fi clients per AP, all on the Gateway, so a roam shows up as one AP's count dropping while another's rises.
+  Asked before the plan, applied only after roaming is verified (on a Dumb AP: after it is confirmed). Nothing
+  about it can stop or roll back roaming: every failure is a warning in the log and the run goes on.
+  - Gateway: `luci-app-statistics`, a listener, RRD output with an hourly backup in cron.
+  - Dumb AP: bare `collectd` that only sends (no `rrdtool`, much less flash). One that already has
+    `luci-app-statistics` keeps it, with RRD output off.
+  - Free flash is checked first: an install that doesn't fit is skipped with a message.
+  - The pairing code carries a non-default port to the Dumb APs.
+- `status` reports monitoring: packages, plugins, listen/server target, the cron line on the Gateway. `report` has a row.
+- The pre-change snapshot also holds `/etc/config/luci_statistics`, `/etc/config/collectd` and the crontab. `undo`
+  restores them after a run that set monitoring up (the packages stay installed).
+
 ## [8.5] — 2026-10-21
 
 ### Fixed
