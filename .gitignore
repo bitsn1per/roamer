@@ -19,3 +19,15 @@ out/
 *.swp
 .idea/
 .vscode/
+
+# Project baseline
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.tfstate
+*.tfstate.*
+CLAUDE.local.md
+.claude/settings.local.json
+tmp/
