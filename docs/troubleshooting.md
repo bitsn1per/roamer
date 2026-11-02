@@ -109,9 +109,26 @@ set `net.ipv4.conf.all.arp_ignore=1` and `arp_announce=2`. `lantest` warns when 
 ```sh
 ./roaming-setup.sh diag     # LAN ports + link state, devices per port, Gateway DHCP, routing, Tailscale, SSH
 ./roaming-setup.sh state    # one line: applying / waiting · rollback in N s · Gateway via LAN ports · confirmation
-./roaming-setup.sh status   # the Dumb AP's switch-over log
+./roaming-setup.sh status   # the Dumb AP's switch-over log, then the monitoring state
 ./roaming-setup.sh report   # what is set up
 ```
+
+## Monitoring: an AP is missing from the Gateway's graphs
+
+`./roaming-setup.sh status` on that AP shows what happened in its last run and where it sends to, and
+on the Gateway what it listens on. Then, on the Gateway, wait a minute and look for its data:
+
+```sh
+ls /tmp/rrd/                              # one folder per host that has sent something
+logread -e collectd | tail                # plugin or network errors on either router
+```
+
+- **Not enough flash**: monitoring was skipped, which is expected on small routers. Roaming isn't affected.
+- **The port differs**: an AP paired before the Gateway's `MON_PORT` changed still sends to the old
+  one. Run Roamer on the AP again with a fresh pairing code.
+- **A LAN firewall on the Gateway** that rejects input: allow UDP 25826 from the LAN. OpenWrt's default
+  LAN zone accepts it.
+- **Two routers with the same hostname** share one entry in the host dropdown: give them different names.
 
 ## Reading the usteer page
 

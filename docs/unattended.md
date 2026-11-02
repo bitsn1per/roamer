@@ -41,6 +41,8 @@ ROUTER=192.168.1.1 PAIR="$(cat roamer-data/Gateway_*/pairing.txt)" CH2=6 CH5=100
 | `CONFIRM_TIMEOUT` | seconds before a Dumb AP rolls back (default 300, `0` = never) |
 | `BRIDGE_WAN` | `1` = keep WAN bridged into the LAN (experts; refused when WAN/LAN use different CPU links) |
 | `FORCE_AP` | `1` = override the "this looks like a Gateway" refusals |
+| `MONITORING` | `yes` / `no` (default `no`): see README → Monitoring |
+| `MON_PORT` | collectd port, default `25826`. Gateway: where it listens. A Dumb AP gets it from the pairing code |
 | `DRY_RUN` | `1` = show plan + UCI changes, write nothing |
 | `ASSUME_YES` | `1` = no questions |
 | `GUARD` | `0` = no internet guard on the Gateway |

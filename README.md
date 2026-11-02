@@ -49,7 +49,7 @@ Every run ends with a **Report**: what is set up on the router, and which files 
 | **setup** | set up a router as the Gateway or a Dumb AP |
 | **lantest** | computer cabled to a Dumb AP that doesn't answer: measures from inside, names the cause, fixes it (with backup and auto-revert) |
 | **report** | what is set up on a router |
-| **state** / **status** | where a Dumb AP switch-over stands / its log |
+| **state** / **status** | where a Dumb AP switch-over stands / its log and the monitoring state |
 | **diag** | what a Dumb AP's LAN ports and bridge see |
 | **pair** | show the Gateway's pairing code again |
 | **confirm** | confirm a Dumb AP switch-over by hand |
@@ -69,6 +69,34 @@ you run the script on a router itself.
   new address (your computer does it for you); otherwise it **rolls back** after 300 s. A Gateway
   cable that started in WAN keeps a temporary way in until then.
 - A recovery card (`recovery/<time>_RECOVERY.txt`) explains every way back, down to failsafe.
+
+## Monitoring (optional)
+
+Answer **yes** to "Enable monitoring?" on every router you want in the graphs (`MONITORING=yes`; the
+default is no). It adds LuCI Statistics graphs of Wi-Fi client counts per AP, with 24-hour and 30-day
+history, all viewable on the Gateway. A roam shows up as one AP's station count dropping while
+another's rises.
+
+**Where to find the graphs:** in the Gateway's LuCI, **Statistics → Graphs → Wireless**. The host
+dropdown picks the AP; each one appears under its Roamer hostname.
+
+- **Gateway**: collects and draws. Installs `luci-app-statistics`, listens on port 25826 (`MON_PORT`).
+- **Dumb AP**: only sends, to the Gateway address in the pairing code. Installs bare `collectd`, which
+  needs far less flash, so its own LuCI has no graphs. A custom port comes with the pairing code too,
+  so run the Gateway first.
+- **It can't hurt roaming**: it is applied after Wi-Fi is verified (on a Dumb AP, after it is confirmed)
+  and any failure is only a warning. An install that doesn't fit the free flash is skipped with a
+  message: about 1 MB on a Dumb AP and about 3 MB on a Gateway, more if the Gateway has no LuCI yet.
+- **Answering no later** leaves an existing setup exactly as it is. Nothing is ever uninstalled.
+  **undo** removes the configuration of a run that set monitoring up; the packages stay installed.
+
+History survives a reboot through an hourly backup in the Gateway's cron, so a crash loses about an
+hour at most. That backup writes to flash once an hour and pauses collection for a moment.
+
+The data travels unencrypted over UDP inside your LAN. Port 25826 is not opened on the WAN side.
+
+`./roaming-setup.sh status` shows the packages, plugins, target and cron line. For per-client roam
+detail, which the graphs don't show, use `logread -e AP-STA-` and `ubus call usteer local_info`.
 
 ## What a run leaves on your computer
 

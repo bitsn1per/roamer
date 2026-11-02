@@ -79,6 +79,36 @@ next in ~50 ms instead of doing a full reconnect.
 A Dumb AP without internet on WAN borrows a temporary lease from the Gateway on its LAN for the
 download.
 
+## Monitoring
+
+Optional, off by default. The question comes before the plan, because a Dumb AP's session ends at the
+switch-over, but the work happens after roaming is verified. On a Dumb AP it runs after the state is
+already `ok`, so it can't trigger a rollback. On both roles it runs in a subshell with a deadline.
+
+| | Gateway | Dumb AP | Dumb AP that already has `luci-app-statistics` |
+|---|---|---|---|
+| Packages | `luci-app-statistics collectd-mod-iwinfo collectd-mod-network` | `collectd collectd-mod-iwinfo collectd-mod-network` | as they are |
+| UCI config | `luci_statistics` | `collectd` | `luci_statistics` |
+| Network | `collectd_network_listen` 0.0.0.0:25826 | `network_server` Gateway:25826 | `collectd_network_server` Gateway:25826 |
+| RRD output | on, `backup=1`, hourly cron line | off, not installed | off |
+
+Why two configurations: `luci-app-statistics` depends on `rrdtool1`, `librrd1` and `collectd-mod-rrdtool`
+even with RRD output off, and a sender uses none of them. From the OpenWrt 24.10 aarch64 feed, on a router
+that already has LuCI, bare `collectd` is 133 KiB to download and 540 KiB installed, against 347 KiB and
+1920 KiB. Where `luci-app-statistics` is installed its init script owns collectd's config, so Roamer
+writes to `luci_statistics` there.
+
+Space check, against free space on `/overlay` (or `/` if there's none), before anything is installed:
+
+| | Gateway | Dumb AP |
+|---|---|---|
+| With package sizes: missing packages plus a reserve | sizes + 1024 KiB | sizes + 256 KiB |
+| Without them: fixed minimum | 3072 KiB | 1024 KiB |
+| No LuCI on the router yet | + 2560 KiB | not needed |
+
+`apk info -s` gives installed sizes. `opkg info` only gives the compressed size, so that counts three
+times. The Gateway's reserve leaves room for the hourly RRD archive.
+
 ## Files
 
 All in `roamer-data/` (git-ignored, mode 600), one folder per router named `<Role>_<hostname>`:
