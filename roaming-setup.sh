@@ -934,6 +934,23 @@ conduit_of() { ip -o link show "$1" 2>/dev/null | sed -n 's/^[0-9]*: [^@:]*@\([^
 brsec() { uci show network 2>/dev/null | sed -n "s/^network\.\([^.]*\)\.name='br-lan'\$/\1/p" | head -n1; }
 own_ip() { ip -4 -o addr show 2>/dev/null | awk -v a="$1" '{split($4,x,"/"); if (x[1]==a) f=1} END{exit !f}'; }
 
+# package manager
+if command -v apk >/dev/null 2>&1; then PM=apk; elif command -v opkg >/dev/null 2>&1; then PM=opkg; else PM=none; fi
+# exact package names only: with apk, wpad-basic-* *provides* "hostapd"/"wpa-supplicant", so
+# `apk info -e hostapd` is true on a basic build — that once made Roamer skip the full-wpad swap
+pkg_has()   { case $PM in
+                apk)  grep -qx "P:$1" /lib/apk/db/installed 2>/dev/null || apk list --installed 2>/dev/null | grep -q "^$1-[0-9]";;
+                opkg) opkg list-installed "$1" 2>/dev/null | grep -q "^$1 ";;
+                *) return 1;; esac; }
+wpad_pkgs() { { { sed -n 's/^P://p' /lib/apk/db/installed || true; }; { apk list --installed 2>/dev/null | sed 's/-[0-9].*//' || true; }; { sed -n 's/^Package: //p' /usr/lib/opkg/status || true; }; } 2>/dev/null | grep -E '^(wpad|hostapd)' | sort -u | tr '\n' ' '; }
+# does this hostapd binary know 802.11v? Its config parser holds the literal "bss_transition" only when
+# 802.11v is compiled in (works on /proc/<pid>/exe too — i.e. on the hostapd that is RUNNING)
+bin_wnm() { [ -r "$1" ] && tr '\000' '\n' < "$1" 2>/dev/null | grep -qx bss_transition; }
+pkg_avail() { case $PM in apk) apk search "$1" 2>/dev/null | grep -q "^$1-[0-9]";; opkg) opkg list "$1" 2>/dev/null | grep -q "^$1 - ";; *) return 1;; esac; }
+pkg_update(){ case $PM in apk) apk update;; opkg) opkg update;; *) return 1;; esac; }
+pkg_add()   { case $PM in apk) apk add "$@";; opkg) opkg install "$@";; *) return 1;; esac; }
+pkg_del()   { case $PM in apk) apk del "$@";; opkg) opkg remove "$@";; *) return 1;; esac; }
+
 state_line() {   # one line for the computer: "<state> · …"
   [ -f "$STATEFILE" ] || { echo "none"; return; }
   IFS='|' read -r _st _new _dl _msg < "$STATEFILE" || true
@@ -1146,23 +1163,6 @@ trap 'exit 130' INT TERM
 P1="$(jsonfilter -i /etc/board.json -e '@.network.lan.ports[0]' 2>/dev/null || true)"
 [ -n "$P1" ] || P1="$(uci -q get "network.$(brsec).ports" 2>/dev/null | awk '{print $1}')"
 P1="${P1:-lan1}"
-
-# package manager
-if command -v apk >/dev/null 2>&1; then PM=apk; elif command -v opkg >/dev/null 2>&1; then PM=opkg; else PM=none; fi
-# exact package names only: with apk, wpad-basic-* *provides* "hostapd"/"wpa-supplicant", so
-# `apk info -e hostapd` is true on a basic build — that once made Roamer skip the full-wpad swap
-pkg_has()   { case $PM in
-                apk)  grep -qx "P:$1" /lib/apk/db/installed 2>/dev/null || apk list --installed 2>/dev/null | grep -q "^$1-[0-9]";;
-                opkg) opkg list-installed "$1" 2>/dev/null | grep -q "^$1 ";;
-                *) return 1;; esac; }
-wpad_pkgs() { { { sed -n 's/^P://p' /lib/apk/db/installed || true; }; { apk list --installed 2>/dev/null | sed 's/-[0-9].*//' || true; }; { sed -n 's/^Package: //p' /usr/lib/opkg/status || true; }; } 2>/dev/null | grep -E '^(wpad|hostapd)' | sort -u | tr '\n' ' '; }
-# does this hostapd binary know 802.11v? Its config parser holds the literal "bss_transition" only when
-# 802.11v is compiled in (works on /proc/<pid>/exe too — i.e. on the hostapd that is RUNNING)
-bin_wnm() { [ -r "$1" ] && tr '\000' '\n' < "$1" 2>/dev/null | grep -qx bss_transition; }
-pkg_avail() { case $PM in apk) apk search "$1" 2>/dev/null | grep -q "^$1-[0-9]";; opkg) opkg list "$1" 2>/dev/null | grep -q "^$1 - ";; *) return 1;; esac; }
-pkg_update(){ case $PM in apk) apk update;; opkg) opkg update;; *) return 1;; esac; }
-pkg_add()   { case $PM in apk) apk add "$@";; opkg) opkg install "$@";; *) return 1;; esac; }
-pkg_del()   { case $PM in apk) apk del "$@";; opkg) opkg remove "$@";; *) return 1;; esac; }
 
 [ "${WS:-0}" = 1 ] || [ "$WELCOMED" = 1 ] || welcome
 
