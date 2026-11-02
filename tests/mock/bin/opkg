@@ -1,0 +1,12 @@
+#!/bin/sh
+# like opkg (select it with RS_PM=opkg): `info` only knows the compressed size, `install` isn't atomic
+db="$MOCK_STATE/apk.installed"
+case "$1" in
+  list-installed) grep -qx "$2" "$db" && echo "$2 - 1.0-r1" ;;
+  list) echo "$2 - 1.0-r1 - stand-in" ;;
+  info) [ "${MOCK_NO_SIZES:-0}" != 1 ] || exit 0
+        printf 'Package: %s\nVersion: 1.0-r1\nSize: 34133\nFilename: %s.ipk\n\n' "$2" "$2" ;;
+  update) [ "${MOCK_UPDATE_FAIL:-0}" != 1 ] ;;
+  install) shift; exec "$(dirname "$0")/mock-pkg" partial "$@" ;;
+  remove) shift; for p; do grep -vx "$p" "$db" > "$db.n"; mv "$db.n" "$db"; done ;;
+esac

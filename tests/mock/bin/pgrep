@@ -1,2 +1,5 @@
 #!/bin/sh
-case "$*" in *dnsmasq*) exit 0;; esac; exit 1
+case "$*" in
+  *dnsmasq*) exit 0;;
+  *collectd*) [ -f "$MOCK_STATE/collectd_running" ]; exit;;
+esac; exit 1

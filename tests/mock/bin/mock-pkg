@@ -1,0 +1,54 @@
+#!/bin/sh
+# Shared by the apk and opkg stand-ins: mock-pkg <atomic|partial> <package>…
+#   MOCK_PKG_FAIL="pkg …"  these can't be installed. atomic (apk): nothing is. partial (opkg): the ones before it are.
+#   MOCK_PKG_HANG=<s>      the install takes this long (for the deadline)
+# Installing a collectd package brings what the real one brings: dependencies, init script, default UCI config.
+mode="$1"; shift
+db="$MOCK_STATE/apk.installed"; here="$(dirname "$0")"
+uci() { python3 "$here/uci.py" "$@"; }
+[ -z "${MOCK_PKG_HANG:-}" ] || python3 -c "import time; time.sleep(${MOCK_PKG_HANG})"
+if [ "$mode" = atomic ]; then
+  for p; do case " ${MOCK_PKG_FAIL:-} " in *" $p "*) echo "ERROR: unable to select packages: $p (no such package)" >&2; exit 1;; esac; done
+fi
+init() {
+  printf '#!/bin/sh\necho "%s $1" >> "%s/svc.log"\ncase "$1" in\n  restart) case " ${MOCK_SVC_FAIL:-} " in *" %s "*) exit 1;; esac; [ %s != collectd ] || touch "%s/collectd_running";;\nesac\nexit 0\n' \
+    "$1" "$MOCK_STATE" "$1" "$1" "$MOCK_STATE" > "/etc/init.d/$1"
+  chmod +x "/etc/init.d/$1"
+}
+has() { grep -qx "$1" "$db"; }
+collectd_base() {
+  has collectd || echo collectd >> "$db"
+  has libltdl7 || echo libltdl7 >> "$db"
+  init collectd
+  if [ ! -f /etc/config/collectd ]; then
+    echo "# test" > /etc/config/collectd
+    uci set collectd.globals=globals
+    uci set collectd.globals.alt_config_file=/etc/collectd.conf
+  fi
+}
+for p; do
+  case " ${MOCK_PKG_FAIL:-} " in *" $p "*) echo "Collected errors: $p: cannot find dependency" >&2; exit 255;; esac
+  case "$p" in
+    collectd) collectd_base; continue ;;
+    collectd-mod-*) collectd_base ;;
+    luci-app-statistics)
+      collectd_base
+      for d in rrdtool1 librrd1 collectd-mod-rrdtool collectd-mod-iwinfo collectd-mod-network collectd-mod-cpu \
+               collectd-mod-memory collectd-mod-interface collectd-mod-load; do has "$d" || echo "$d" >> "$db"; done
+      init luci_statistics
+      if [ ! -f /etc/config/luci_statistics ]; then
+        echo "# test" > /etc/config/luci_statistics
+        uci set luci_statistics.collectd=statistics
+        uci set luci_statistics.collectd_rrdtool=statistics
+        uci set luci_statistics.collectd_rrdtool.enable=1
+        uci set luci_statistics.collectd_rrdtool.DataDir=/tmp/rrd
+        uci set luci_statistics.collectd_rrdtool.backup=0
+        uci set luci_statistics.collectd_iwinfo=statistics
+        uci set luci_statistics.collectd_iwinfo.enable=1
+        uci set luci_statistics.collectd_network=statistics
+        uci set luci_statistics.collectd_network.enable=0
+      fi ;;
+  esac
+  has "$p" || echo "$p" >> "$db"
+done
+exit 0

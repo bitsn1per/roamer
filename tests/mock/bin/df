@@ -1,0 +1,6 @@
+#!/bin/sh
+# flash stand-in: MOCK_OVERLAY_KB = KiB free on the overlay; MOCK_NO_DF=1: unreadable
+[ "${MOCK_NO_DF:-0}" != 1 ] || exit 1
+free="${MOCK_OVERLAY_KB:-20480}"
+echo "Filesystem           1K-blocks      Used Available Use% Mounted on"
+echo "/dev/mtdblock5           32768     $((32768 - free))   $free  10% /overlay"

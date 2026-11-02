@@ -20,6 +20,7 @@
 #   MD keep|derive|gen|<4 hex>   ROAM_DBM -70   NAME (Dumb AP hostname)
 #   Dumb AP: AP_ADDR static|dhcp  AP_IP  GW_IP  NETMASK  MGMT_IP <ip>|off  (BRIDGE_WAN=1: experts only)
 #            CONFIRM_TIMEOUT 300  FORCE_AP=1
+#   MONITORING yes|no (default no)  MON_PORT 25826  (Gateway: listen port; Dumb AP: the pairing code brings it)
 #   DRY_RUN=1  ASSUME_YES=1  GUARD=0  PING_HOST 1.1.1.1  WIFI_WAIT <s>  CLEAR=0  NO_COLOR=1  COLS <n>
 set -eu
 
@@ -30,6 +31,7 @@ DRY_RUN="${DRY_RUN:-0}"; GUARD="${GUARD:-1}"; PING_HOST="${PING_HOST:-1.1.1.1}"
 ASSUME_YES="${ASSUME_YES:-0}"; CONFIRM_TIMEOUT="${CONFIRM_TIMEOUT:-300}"; CLEAR="${CLEAR:-1}"
 PAIRFILE=/etc/roaming-setup.pair
 APLOG=/tmp/roaming-apply.log; CONFIRMFILE=/tmp/roaming-confirm; STATEFILE=/tmp/roaming-state; JOBPID=/tmp/roaming-job.pid
+MONSTATEFILE=/tmp/roaming-monitoring
 SYSNET="${SYSNET:-/sys/class/net}"      # override for testing
 case "$CONFIRM_TIMEOUT" in ""|*[!0-9]*) echo "ERROR: CONFIRM_TIMEOUT must be seconds" >&2; exit 1;; esac
 
@@ -77,14 +79,14 @@ box() {   # box "title" line…  — framed panel, as wide as its longest line (
 }
 STEPN=0; WHO="setup"; BOXW=""
 # chapters: names + expected steps per chapter (for the progress bar)
-CHN="Start Check Wi-Fi Apply"; CHE="3 2 11 2"; CH="Start"; CURCH=""; CHS=0
+CHN="Start Check Wi-Fi Apply"; CHE="3 2 12 3"; CH="Start"; CURCH=""; CHS=0
 chapters() {
   case "$1" in
     computer) CHN="Connect Backup Router Finish"; CHE="1 1 1 1" ;;
     lantest)  CHN="Check Measure Fix Report"; CHE="2 2 2 1" ;;
     tool)     CHN="Connect Run"; CHE="1 1" ;;
-    ap)       CHN="Start Check Wi-Fi Address Apply"; CHE="4 2 10 4 2" ;;
-    *)        CHN="Start Check Wi-Fi Apply"; CHE="3 2 11 2" ;;
+    ap)       CHN="Start Check Wi-Fi Address Apply"; CHE="4 2 10 5 2" ;;
+    *)        CHN="Start Check Wi-Fi Apply"; CHE="3 2 12 3" ;;
   esac
 }
 progress() {   # chapter line + bar
@@ -384,6 +386,23 @@ wait_dumb_ap() {   # wait_dumb_ap <new ip> <timeout> <cabling> <old WAN ip|-> <f
   fi
   [ -n "$APSTATE" ] || APSTATE="${_last:-did not answer at $_ip in time}"
   return 1
+}
+
+wait_monitoring() {   # a Dumb AP installs monitoring after it is confirmed: wait for it so the report shows the outcome
+  _ms="$(ssh $SSHO -o ConnectTimeout=5 "root@$1" "cat $MONSTATEFILE 2>/dev/null" 2>/dev/null || true)"
+  case "$_ms" in pending*|running*) ;; *) return 0;; esac
+  step "Monitoring on the Dumb AP"
+  say "  ${D}roaming is set up; installing monitoring (this never affects it) …${N}"
+  _dl=$(( $(date +%s) + ${MON_TIMEOUT:-600} + 30 ))
+  while [ "$(date +%s)" -lt "$_dl" ]; do
+    _ms="$(ssh $SSHO -o ConnectTimeout=5 "root@$1" "cat $MONSTATEFILE 2>/dev/null" 2>/dev/null || true)"
+    case "$_ms" in pending*|running*) sleep 5;; *) break;; esac
+  done
+  case "$_ms" in
+    on*)  okl "monitoring: ${_ms#*|}" ;;
+    pending*|running*) wrn "monitoring is still being set up — ./roaming-setup.sh status shows the outcome" ;;
+    *)    wrn "monitoring: ${_ms#*|} — roaming is not affected" ;;
+  esac
 }
 
 final_report() {   # final_report <ok|err> <role> <report host>
@@ -778,7 +797,7 @@ home_menu() {
     "lantest|LAN-port test — this computer is cabled to a Dumb AP that doesn't answer" \
     "report|Report — what is set up on a router" \
     "state|State — one line: where a Dumb AP switch-over stands" \
-    "status|Status — a Dumb AP's switch-over log" \
+    "status|Status — a Dumb AP's switch-over log, monitoring" \
     "diag|Diagnostics — what a Dumb AP's LAN ports and bridge see" \
     "pair|Pairing code — show the Gateway's code again" \
     "confirm|Confirm — confirm a Dumb AP switch-over by hand" \
@@ -793,7 +812,7 @@ help_screen() {
   box "Commands  (./roaming-setup.sh <command> runs one directly)" \
     "setup     set up a router (default)       lantest  cabled to a Dumb AP, no answer" \
     "report    what is set up on a router      state    Dumb AP switch-over, one line" \
-    "status    Dumb AP switch-over log         diag     Dumb AP LAN-side view" \
+    "status    switch-over log, monitoring     diag     Dumb AP LAN-side view" \
     "pair      Gateway's pairing code again    confirm  confirm a switch-over by hand" \
     "undo      restore the pre-run snapshot    help     this screen"
   box "Files: $(rel "$DATA")/  (one folder per router, mode 600, git-ignored)" \
@@ -869,7 +888,7 @@ ws_setup() {
   { echo "export WS=1 BACKUP=no NOLOG=1 COLS=$COLS"; [ -z "${NO_COLOR:-}" ] || echo "export NO_COLOR=1"
     for v in ROLE PAIR TAILSCALE BANDS COUNTRY IFACE_2G IFACE_5G CH2 CH5 HT2 HT5 TXP2 TXP5 SSID KEY ENC HIDDEN MD \
              ROAM_DBM NAME AP_ADDR AP_IP GW_IP NETMASK BRIDGE_WAN MGMT_IP TS_ACCEPT CONFIRM_TIMEOUT FORCE_AP \
-             DRY_RUN ASSUME_YES GUARD PING_HOST CLEAR WIFI_WAIT; do
+             DRY_RUN ASSUME_YES GUARD PING_HOST CLEAR WIFI_WAIT MONITORING MON_PORT; do
       if isset "$v"; then echo "export $v=$(squote "$(getv "$v")")"; fi
     done; } | rsh 'umask 077; cat > /tmp/roaming-env'
   tflag="-t"; [ $TTY = 1 ] || tflag="-T"
@@ -895,7 +914,7 @@ ws_setup() {
   if [ -n "$sw" ] && [ "$rc" = 0 ]; then
     # shellcheck disable=SC2086
     set -- $sw; role=ap
-    if wait_dumb_ap "$2" "$3" "${4:-lan}" "${5:--}" "${6:-}"; then rhost="$2"; else rc=1; rhost=""; fi
+    if wait_dumb_ap "$2" "$3" "${4:-lan}" "${5:--}" "${6:-}"; then rhost="$2"; wait_monitoring "$2"; else rc=1; rhost=""; fi
   fi
   if [ "$DRY_RUN" = 1 ]; then st=err; [ "$rc" = 0 ] && st=ok; mv "$LOGTMP" "$LOGB.dryrun_$st.log"; LOGTMP=""; echo "log saved: $(rel "$LOGB").dryrun_$st.log"; return "$rc"; fi
   st=err; [ "$rc" = 0 ] && st=ok
@@ -936,6 +955,7 @@ own_ip() { ip -4 -o addr show 2>/dev/null | awk -v a="$1" '{split($4,x,"/"); if 
 
 # package manager
 if command -v apk >/dev/null 2>&1; then PM=apk; elif command -v opkg >/dev/null 2>&1; then PM=opkg; else PM=none; fi
+case "${RS_PM:-}" in apk|opkg) PM="$RS_PM";; esac      # RS_PM: override for testing
 # exact package names only: with apk, wpad-basic-* *provides* "hostapd"/"wpa-supplicant", so
 # `apk info -e hostapd` is true on a basic build — that once made Roamer skip the full-wpad swap
 pkg_has()   { case $PM in
@@ -950,6 +970,231 @@ pkg_avail() { case $PM in apk) apk search "$1" 2>/dev/null | grep -q "^$1-[0-9]"
 pkg_update(){ case $PM in apk) apk update;; opkg) opkg update;; *) return 1;; esac; }
 pkg_add()   { case $PM in apk) apk add "$@";; opkg) opkg install "$@";; *) return 1;; esac; }
 pkg_del()   { case $PM in apk) apk del "$@";; opkg) opkg remove "$@";; *) return 1;; esac; }
+
+# ---------------------------------------------------------------- monitoring (optional)
+# LuCI Statistics graphs of Wi-Fi clients per AP, all viewable on the Gateway. Asked before the plan, applied
+# only after roaming is verified; nothing here can stop or roll back roaming: every failure is a warning.
+#
+# UCI names, checked against openwrt/luci, applications/luci-app-statistics:
+#   root/etc/config/luci_statistics          sections collectd, collectd_iwinfo, collectd_network, collectd_rrdtool
+#   root/usr/libexec/stat-genconfig          collectd_network_listen / collectd_network_server (host, port); Hostname
+#   htdocs/.../view/statistics/plugins/network.js  the same section types and option names in LuCI's form
+#   root/etc/init.d/luci_statistics          `backup` command; collectd_rrdtool.backup + DataDir enable it
+# Bare collectd (Dumb AP), checked against openwrt/packages, utils/collectd/files/:
+#   collectd.uci, collectd.init              globals, plugin 'iwinfo'/'network'/'rrdtool', network_server (host, port)
+#
+# A Dumb AP only sends, so it gets bare collectd instead of luci-app-statistics, which hard-depends on rrdtool1,
+# librrd1 and collectd-mod-rrdtool even with RRD output off. Feed sizes (OpenWrt 24.10, aarch64_cortex-a53, packages
+# a router with LuCI doesn't have yet): 133 KiB download / 540 KiB installed, against 347 KiB / 1920 KiB. Both use
+# collectd's default 30 s interval, which the Gateway's RRD files expect. A router that already has
+# luci-app-statistics keeps it: its init script owns collectd's config there.
+MON_DEFPORT=25826
+MON_CRON='0 * * * * service luci_statistics backup'
+MON_GW_PKGS="luci-app-statistics collectd-mod-iwinfo collectd-mod-network"
+MON_AP_PKGS="collectd collectd-mod-iwinfo collectd-mod-network"
+# what those pull in beyond a stock router: the list sized by the space check
+MON_GW_ALL="luci-app-statistics collectd libltdl7 rrdtool1 librrd1 collectd-mod-rrdtool collectd-mod-iwinfo collectd-mod-network collectd-mod-cpu collectd-mod-memory collectd-mod-interface collectd-mod-load"
+MON_AP_ALL="collectd libltdl7 collectd-mod-iwinfo collectd-mod-network"
+# Space check, KiB on the overlay. Reserve = room left after installing: on the Gateway the hourly RRD archive
+# (/etc/luci_statistics/rrdbackup.tgz, a few hundred KiB with several APs). Fallback = used when the package
+# manager gives no sizes: the feed sizes above rounded up, plus the reserve. No LuCI yet = what
+# luci-app-statistics pulls in on top of that (measured from the same feed: 4450 - 1920 KiB).
+MON_GW_RESERVE=1024; MON_AP_RESERVE=256
+MON_GW_FALLBACK=3072; MON_AP_FALLBACK=1024
+MON_NOLUCI=2560
+MON_TIMEOUT="${MON_TIMEOUT:-600}"     # seconds before a hung install is given up on
+
+v_port() { case "$1" in ""|*[!0-9]*) echo "a port number, 1-65535"; return 1;; esac
+           [ "$1" -ge 1 ] && [ "$1" -le 65535 ] || { echo "a port number, 1-65535"; return 1; }; }
+mon_state() { echo "$*" > "$MONSTATEFILE" 2>/dev/null || true; }
+mon_warn()  { log "  ⚠ monitoring: $*"; }
+mon_skip()  { mon_warn "$1 — skipped; roaming is not affected"; mon_state "$2|$1"; return 1; }
+
+mon_pkg_kb() {   # KiB one package takes once installed, or nothing when the package manager doesn't say
+  case $PM in
+    apk)  apk info -s "$1" 2>/dev/null | awk '$2=="B"{print int($1/1024)+1; exit} $2=="KiB"{print $1+0; exit} $2=="MiB"{print $1*1024; exit}' ;;
+    # opkg only reports the compressed package ("Size:", bytes): x3 is on the safe side of the installed size
+    opkg) opkg info "$1" 2>/dev/null | awk '/^Size: /{print int($2*3/1024)+1; exit}' ;;
+  esac
+}
+mon_measure() {  # sets MON_NEED (KiB needed on the overlay for what is missing) and MON_BASIS
+  if [ "$ROLE" = ap ]; then _a="$MON_AP_ALL" _res=$MON_AP_RESERVE _fb=$MON_AP_FALLBACK
+  else _a="$MON_GW_ALL" _res=$MON_GW_RESERVE _fb=$MON_GW_FALLBACK; fi
+  _sum=0
+  for _p in $_a; do
+    pkg_has "$_p" && continue
+    _k="$(mon_pkg_kb "$_p")"
+    case "$_k" in ""|*[!0-9]*) _sum=""; break;; esac
+    _sum=$((_sum + _k))
+  done
+  if [ -n "$_sum" ]; then MON_NEED=$((_sum + _res)); MON_BASIS="package sizes + $_res KiB reserve"
+  else MON_NEED=$_fb; MON_BASIS="no package sizes available, fixed minimum"; fi
+  if [ "$ROLE" != ap ] && ! pkg_has luci-base; then MON_NEED=$((MON_NEED + MON_NOLUCI)); MON_BASIS="$MON_BASIS, + LuCI"; fi
+}
+mon_free() { { df -k /overlay 2>/dev/null || df -k / 2>/dev/null; } | awk 'NR==2 && $4 ~ /^[0-9]+$/ {print $4}'; }
+
+mon_install() {  # installs what is missing. 0 = all there; otherwise it warned and wrote the state file
+  _miss=""; for _p in $MON_PKGS; do pkg_has "$_p" || _miss="$_miss $_p"; done
+  [ -n "$_miss" ] || return 0
+  [ "$PM" != none ] || { mon_skip "no package manager found" skipped; return 1; }
+  # a Dumb AP's network was reloaded moments ago: one retry
+  pkg_update >/dev/null 2>&1 || { sleep 10; pkg_update >/dev/null 2>&1; } \
+    || { mon_skip "could not update the package lists (no internet?)" failed; return 1; }
+  mon_measure
+  _free="$(mon_free)"
+  [ -n "$_free" ] || { mon_skip "could not read the free flash space" skipped; return 1; }
+  if [ "$_free" -lt "$MON_NEED" ]; then
+    mon_skip "not enough flash: needs about $MON_NEED KiB ($MON_BASIS), $_free KiB free" skipped; return 1
+  fi
+  log "  monitoring: installing$_miss ($_free KiB free, about $MON_NEED KiB needed) …"
+  # shellcheck disable=SC2086  # a list of package names
+  if pkg_add $_miss >/tmp/roamer-mon-pkg.log 2>&1; then
+    _bad=""; for _p in $MON_PKGS; do pkg_has "$_p" || _bad="$_bad $_p"; done
+    if [ -z "$_bad" ]; then rm -f /tmp/roamer-mon-pkg.log; return 0; fi
+  else _bad="$_miss"; fi
+  mon_warn "package manager: $(tail -n 2 /tmp/roamer-mon-pkg.log 2>/dev/null | tr '\n' ' ')"
+  rm -f /tmp/roamer-mon-pkg.log
+  # opkg isn't atomic: don't leave half an install filling the flash
+  for _p in $_miss; do if pkg_has "$_p"; then pkg_del "$_p" >/dev/null 2>&1 || true; fi; done
+  mon_skip "could not install:$_bad" failed; return 1
+}
+mon_section() {  # mon_section <config> <type> <host> <port>: exactly one section with this target, re-runs included
+  _me="roamer_${2##*_}"; _other=0
+  for _s in $(sections "$1" "$2"); do
+    [ "$_s" != "$_me" ] || continue
+    if [ "$(uci -q get "$1.$_s.host" || true)" = "$3" ] && [ "$(uci -q get "$1.$_s.port" || echo "$MON_DEFPORT")" = "$4" ]; then _other=1; fi
+  done
+  if [ $_other = 1 ]; then uci -q delete "$1.$_me" || true; return 0; fi    # one made by hand already does this
+  uci set "$1.$_me=$2" && uci set "$1.$_me.host=$3" && uci set "$1.$_me.port=$4"
+}
+mon_cfg_luci() {
+  _c=luci_statistics; [ -f /etc/config/$_c ] || : > /etc/config/$_c
+  uci set $_c.collectd=statistics && uci set "$_c.collectd.Hostname=$MON_NAME" \
+    && uci set $_c.collectd_iwinfo=statistics && uci set $_c.collectd_iwinfo.enable=1 \
+    && uci set $_c.collectd_network=statistics && uci set $_c.collectd_network.enable=1 \
+    && uci set $_c.collectd_rrdtool=statistics || return 1
+  if [ "$ROLE" = ap ]; then
+    uci set $_c.collectd_rrdtool.enable=0 && mon_section $_c collectd_network_server "$GW_IP" "$MON_PORT" || return 1
+  else
+    uci set $_c.collectd_rrdtool.enable=1 && uci set $_c.collectd_rrdtool.backup=1 \
+      && mon_section $_c collectd_network_listen 0.0.0.0 "$MON_PORT" || return 1
+  fi
+  uci commit $_c || return 1
+  # the luci_statistics init script writes /etc/collectd.conf; collectd must read that one
+  if [ "$(uci -q get collectd.globals || true)" = globals ]; then
+    uci set collectd.globals.alt_config_file=/etc/collectd.conf && uci commit collectd || return 1
+  fi
+}
+mon_cfg_bare() {
+  _c=collectd; [ -f /etc/config/$_c ] || : > /etc/config/$_c
+  uci set $_c.globals=globals || return 1
+  uci -q delete $_c.globals.alt_config_file || true    # collectd.init would ignore UCI if that file exists
+  uci set "$_c.globals.Hostname=$MON_NAME" \
+    && uci set $_c.iwinfo=plugin && uci set $_c.iwinfo.enable=1 \
+    && uci set $_c.network=plugin && uci set $_c.network.enable=1 && uci set $_c.network.Forward=0 \
+    && uci set $_c.rrdtool=plugin && uci set $_c.rrdtool.enable=0 \
+    && mon_section $_c network_server "$GW_IP" "$MON_PORT" \
+    && uci commit $_c
+}
+mon_cron() {     # the hourly RRD backup: RRD files live in /tmp, this limits a crash to about an hour of history
+  _f=/etc/crontabs/root; mkdir -p /etc/crontabs || return 1; [ -f "$_f" ] || : > "$_f" || return 1
+  if ! grep -qxF "$MON_CRON" "$_f"; then
+    [ -z "$(tail -c 1 "$_f")" ] || echo >> "$_f"      # a last line without newline must not swallow ours
+    echo "$MON_CRON" >> "$_f" || return 1
+  fi
+  /etc/init.d/cron enable 2>/dev/null; /etc/init.d/cron restart >/dev/null 2>&1
+}
+mon_services() { # mon_services <service>…: enable + restart; a failure is reported, the others still run
+  _bad=""
+  for _s; do
+    if [ -x "/etc/init.d/$_s" ]; then /etc/init.d/"$_s" enable >/dev/null 2>&1 || true
+      /etc/init.d/"$_s" restart >/dev/null 2>&1 || _bad="$_bad $_s"
+    else _bad="$_bad $_s"; fi
+  done
+  [ -z "$_bad" ] || mon_warn "could not restart:$_bad — ./roaming-setup.sh status shows what is running"
+}
+mon_apply() {
+  umask 022
+  MON_NAME="${NAME:-$HOST}"
+  if [ "$ROLE" = ap ] && ! pkg_has luci-app-statistics; then MON_PKGS="$MON_AP_PKGS" _be=bare
+  else MON_PKGS="$MON_GW_PKGS" _be=luci; fi
+  mon_state "running|installing packages"
+  mon_install || return 1
+  mon_state "running|configuring"
+  if [ "$_be" = bare ]; then
+    mon_cfg_bare || { uci revert collectd 2>/dev/null || true; mon_skip "could not write /etc/config/collectd" failed; return 1; }
+    mon_services collectd
+  else
+    mon_cfg_luci || { uci revert luci_statistics 2>/dev/null || true; mon_skip "could not write /etc/config/luci_statistics" failed; return 1; }
+    if [ "$ROLE" != ap ]; then mon_cron || mon_warn "could not set up the hourly backup in cron: history is lost on a crash or reboot"; fi
+    mon_services luci_statistics collectd
+  fi
+  if [ "$ROLE" = ap ]; then mon_state "on|sends to $GW_IP:$MON_PORT as $MON_NAME"; log "  ✓ monitoring: sends to $GW_IP:$MON_PORT as $MON_NAME"
+  else mon_state "on|listens on port $MON_PORT as $MON_NAME"; log "  ✓ monitoring: listens on port $MON_PORT as $MON_NAME (Statistics → Graphs → Wireless)"; fi
+}
+mon_run() {      # the step, in a subshell with a deadline: whatever happens in there, the run goes on
+  [ "${MONITORING:-no}" = yes ] || return 0
+  ( mon_apply ) & _mp=$!
+  _dl=$(( $(date +%s) + MON_TIMEOUT ))
+  while kill -0 "$_mp" 2>/dev/null; do
+    if [ "$(date +%s)" -ge "$_dl" ]; then
+      kill "$_mp" 2>/dev/null || true
+      mon_warn "gave up after ${MON_TIMEOUT}s — skipped; roaming is not affected"
+      mon_state "failed|gave up after ${MON_TIMEOUT}s"
+      break
+    fi
+    sleep 2
+  done
+  wait "$_mp" 2>/dev/null || true
+  case "$(cat "$MONSTATEFILE" 2>/dev/null)" in      # the step died without saying why
+    running*) mon_warn "stopped unexpectedly — roaming is not affected"; mon_state "failed|stopped unexpectedly";;
+  esac
+}
+
+mon_backend() { if pkg_has luci-app-statistics; then echo luci; elif pkg_has collectd; then echo bare; fi; }
+mon_targets() {  # mon_targets <config> <type> → host:port …
+  for _s in $(sections "$1" "$2"); do
+    printf '%s:%s ' "$(uci -q get "$1.$_s.host" || echo '?')" "$(uci -q get "$1.$_s.port" || echo "$MON_DEFPORT")"
+  done
+}
+mon_onoff() { [ "$(uci -q get "$1" || true)" = 1 ] && echo on || echo off; }
+mon_status() {   # the `status` part: what monitoring looks like on this router, per role
+  echo ""; echo "== monitoring"
+  _isap=0; [ "$(uci -q get dhcp.lan.ignore || true)" != 1 ] || _isap=1
+  [ $_isap = 1 ] && echo "   role      Dumb AP (sender)" || echo "   role      Gateway (listener + graphs)"
+  _b="$(mon_backend)"
+  _ls="$(cut -d'|' -f1 "$MONSTATEFILE" 2>/dev/null || true)"; _lm="$(cut -d'|' -f2- "$MONSTATEFILE" 2>/dev/null || true)"
+  [ -z "$_ls" ] || echo "   last run  $_ls${_lm:+: $_lm}"
+  _pl="$MON_GW_PKGS"; [ "$_b" != bare ] || _pl="$MON_AP_PKGS"
+  _pt=""; for _p in $_pl; do if pkg_has "$_p"; then _pt="$_pt $_p ✓"; else _pt="$_pt $_p ✗"; fi; done
+  echo "   packages $_pt"
+  if [ -z "$_b" ]; then echo "   not set up"; return 0; fi
+  _run=stopped; pgrep -x collectd >/dev/null 2>&1 && _run=running
+  if [ "$_b" = bare ]; then
+    echo "   plugins   iwinfo $(mon_onoff collectd.iwinfo.enable) · network $(mon_onoff collectd.network.enable) · rrdtool $(mon_onoff collectd.rrdtool.enable)"
+    echo "   server    $(mon_targets collectd network_server)"
+    echo "   hostname  $(uci -q get collectd.globals.Hostname || echo '(system hostname)')"
+  else
+    echo "   plugins   iwinfo $(mon_onoff luci_statistics.collectd_iwinfo.enable) · network $(mon_onoff luci_statistics.collectd_network.enable) · rrdtool $(mon_onoff luci_statistics.collectd_rrdtool.enable) (backup $(mon_onoff luci_statistics.collectd_rrdtool.backup))"
+    if [ $_isap = 1 ]; then echo "   server    $(mon_targets luci_statistics collectd_network_server)"
+    else echo "   listen    $(mon_targets luci_statistics collectd_network_listen)"; fi
+    echo "   hostname  $(uci -q get luci_statistics.collectd.Hostname || echo '(system hostname)')"
+  fi
+  echo "   collectd  $_run"
+  if [ $_isap = 0 ]; then
+    if grep -qxF "$MON_CRON" /etc/crontabs/root 2>/dev/null; then echo "   cron      $MON_CRON"; else echo "   cron      no hourly backup line"; fi
+  fi
+}
+mon_report() {   # the `report` row; silent on a router that never had monitoring
+  _ls="$(cut -d'|' -f1 "$MONSTATEFILE" 2>/dev/null || true)"; _lm="$(cut -d'|' -f2- "$MONSTATEFILE" 2>/dev/null || true)"
+  case "$_ls" in skipped|failed) echo "monitoring|$_ls: $_lm"; return 0;; esac
+  case "$(mon_backend)" in
+    luci) _t="$(mon_targets luci_statistics collectd_network_listen)"
+          if [ "$(uci -q get dhcp.lan.ignore || true)" = 1 ]; then echo "monitoring|sends to $(mon_targets luci_statistics collectd_network_server)"
+          elif [ -n "$_t" ]; then echo "monitoring|listens on $_t· graphs: Statistics → Graphs → Wireless"; fi ;;
+    bare) echo "monitoring|sends to $(mon_targets collectd network_server)" ;;
+  esac
+}
 
 state_line() {   # one line for the computer: "<state> · …"
   [ -f "$STATEFILE" ] || { echo "none"; return; }
@@ -987,6 +1232,7 @@ report() {   # key|value lines describing this router's roaming setup
   _pk="$( { { sed -n 's/^P://p' /lib/apk/db/installed || true; }; { sed -n 's/^Package: //p' /usr/lib/opkg/status || true; }; { apk list --installed 2>/dev/null | sed 's/-[0-9].*//' || true; }; } 2>/dev/null \
          | grep -E '^(wpad|hostapd|usteer|luci-app-usteer|tailscale)' | sort -u | tr '\n' ' ')"
   [ -z "$_pk" ] || echo "packages|$_pk"
+  mon_report
   _u="$(readlink /etc/roaming-setup.bak/restore-latest.sh 2>/dev/null || true)"
   [ -z "$_u" ] || echo "undo|sh $_u"
 }
@@ -1092,7 +1338,7 @@ if [ -z "$RACT" ] && [ "${WS:-0}" != 1 ] && [ $TTY = 1 ] && ! isset ROLE && ! is
     "setup|Set up this router — as the Gateway or as a Dumb AP" \
     "report|Report — what is set up here" \
     "state|State — one line: where a Dumb AP switch-over stands" \
-    "status|Status — the Dumb AP switch-over log" \
+    "status|Status — the Dumb AP switch-over log, monitoring" \
     "diag|Diagnostics — what the LAN ports and bridge see" \
     "pair|Pairing code — show this Gateway's code again" \
     "confirm|Confirm — confirm a Dumb AP switch-over by hand" \
@@ -1123,7 +1369,7 @@ case "$RACT" in
       echo "Connect to $_new (through the Gateway) and confirm there."; exit 3
     fi
     touch "$CONFIRMFILE"; echo "Confirmed — auto-rollback cancelled."; exit 0 ;;
-  status)  cat "$APLOG" 2>/dev/null || echo "no $APLOG"; exit 0 ;;
+  status)  cat "$APLOG" 2>/dev/null || echo "no $APLOG"; mon_status; exit 0 ;;
   state)   state_line; exit 0 ;;
   diag)    diag; exit 0 ;;
   lanprobe) lanprobe "${2:-}" "${3:-}"; exit 0 ;;
@@ -1232,6 +1478,7 @@ if [ "$ROLE" = ap ]; then
       case "$k" in
         SSID|KEY|ENC|MD|HIDDEN|COUNTRY|BANDS|ROAM_DBM|GW_IP) isset "$k" || setv "$k" "$v"; _n=$((_n+1)) ;;
         GW_CH2|GW_CH5|POOL_START|POOL_LIMIT|GW_NAME|GW_PREFIX) setv "P_$k" "$v" ;;
+        MON_PORT) isset MON_PORT || setv MON_PORT "$v" ;;
       esac
     done <<EOF
 $payload
@@ -1758,6 +2005,22 @@ if [ "$ROLE" = ap ]; then
   else CAB=connect; fi
 fi
 
+# ---------------------------------------------------------------- monitoring: the question (applied after roaming works)
+MON_HAS="$(mon_backend)"
+if ! isset MONITORING; then
+  step "Monitoring (optional)"
+  if [ "$ROLE" = ap ]; then _mw="this Dumb AP sends its Wi-Fi client counts to the Gateway ($GW_IP)"
+  else _mw="this Gateway collects every AP's Wi-Fi client counts: LuCI graphs, 24 h and 30 days"; fi
+  box "Monitoring" "$_mw" "a roam shows up as one AP's count dropping while another's rises" \
+    "installed after roaming is verified; if it fails you get a warning, roaming stays"
+  [ -z "$MON_HAS" ] || say "  ${D}already installed here; \"no\" leaves it exactly as it is.${N}"
+  say ""
+fi
+choose MONITORING "Enable monitoring?" no "no|no — skip" "yes|yes — install and set up"
+MON_PORT="${MON_PORT:-$MON_DEFPORT}"
+case "$MONITORING" in yes|no) ;; *) wrn "MONITORING='$MONITORING' is not yes or no — monitoring stays off"; MONITORING=no;; esac
+if [ "$MONITORING" = yes ] && ! v_port "$MON_PORT" >/dev/null; then wrn "MON_PORT='$MON_PORT' is not a port — monitoring stays off"; MONITORING=no; fi
+
 # ---------------------------------------------------------------- 11. plan
 CH=Apply
 step "Plan — nothing has been changed yet"
@@ -1808,6 +2071,11 @@ if [ "$ROLE" = ap ]; then
   say "  confirmed only when the Gateway answers through the LAN ports AND you log in (SSH/LuCI) or"
   say "  run ./roaming-setup.sh confirm — otherwise rollback after ${CONFIRM_TIMEOUT}s"
 fi
+if [ "$MONITORING" = yes ]; then
+  say ""
+  if [ "$ROLE" = ap ]; then say "  monitoring: sends to $GW_IP:$MON_PORT once this Dumb AP is confirmed; a failure only warns"
+  else say "  monitoring: LuCI Statistics, listens on port $MON_PORT, hourly backup in cron — after Wi-Fi is verified; a failure only warns"; fi
+fi
 [ "$DRY_RUN" = 1 ] || confirm "Apply this plan?" || { say "  aborted — nothing changed"; exit 0; }
 
 # ---------------------------------------------------------------- recovery card / restore.sh
@@ -1852,6 +2120,10 @@ mkrestore() {
     echo 'if [ -f "$D/usteer" ]; then cp "$D/usteer" /etc/config/usteer; else rm -f /etc/config/usteer; fi'
     echo '[ -f "$D/.usteer_was_enabled" ] || /etc/init.d/usteer disable 2>/dev/null'
     [ "$ROLE" = ap ] && echo "for s in $SVC_ON; do /etc/init.d/\$s enable; done"
+    if [ "${MONITORING:-no}" = yes ]; then     # this run set monitoring up: undo that too (packages stay installed)
+      echo 'for f in luci_statistics collectd; do if [ -f "$D/$f" ]; then cp "$D/$f" /etc/config/$f; elif [ -x /etc/init.d/$f ]; then /etc/init.d/$f stop; /etc/init.d/$f disable; fi; done'
+      echo 'if [ -f "$D/crontabs.root" ]; then cp "$D/crontabs.root" /etc/crontabs/root; else sed -i "/ service luci_statistics backup\$/d" /etc/crontabs/root 2>/dev/null; fi'
+    fi
     echo 'sync; echo "restored from $D — rebooting"; reboot -f'
   } > "$SNAP/restore.sh"
   chmod 700 "$SNAP/restore.sh"
@@ -1864,7 +2136,8 @@ SNAP="/etc/roaming-setup.bak/$TS"
 SVC_ON=""
 if [ "$DRY_RUN" != 1 ]; then
   mkdir -p "$SNAP"
-  for f in wireless usteer system network dhcp firewall; do if [ -f /etc/config/$f ]; then cp /etc/config/$f "$SNAP/"; fi; done
+  for f in wireless usteer system network dhcp firewall luci_statistics collectd; do if [ -f /etc/config/$f ]; then cp /etc/config/$f "$SNAP/"; fi; done
+  if [ -f /etc/crontabs/root ]; then cp /etc/crontabs/root "$SNAP/crontabs.root"; fi
   if /etc/init.d/usteer enabled 2>/dev/null; then touch "$SNAP/.usteer_was_enabled"; fi
   for s in dnsmasq odhcpd firewall; do if /etc/init.d/$s enabled 2>/dev/null; then SVC_ON="$SVC_ON $s"; fi; done
   OLDIP="$(awk '/^config interface .lan.$/{f=1;next} /^config /{f=0} f && $2=="ipaddr"{gsub(/\047/,"",$3); sub(/\/.*/,"",$3); print $3; exit}' "$SNAP/network" 2>/dev/null || true)"
@@ -1979,6 +2252,7 @@ mkpair() {   # $1 = 1 → use operating channels (after apply)
   printf 'V=1\nSSID=%s\nKEY=%s\nENC=%s\nMD=%s\nHIDDEN=%s\nCOUNTRY=%s\nBANDS=%s\nROAM_DBM=%s\nGW_IP=%s\nGW_PREFIX=%s\nGW_CH2=%s\nGW_CH5=%s\nPOOL_START=%s\nPOOL_LIMIT=%s\nGW_NAME=%s\n' \
     "$SSID" "$KEY" "$ENC" "$MD" "$HIDDEN" "$cc" "$BANDS" "$ROAM_DBM" "$lip" "${lpf:-24}" "$c2" "$c5" \
     "$(uci -q get dhcp.lan.start || echo 100)" "$(uci -q get dhcp.lan.limit || echo 150)" "$HOST"
+  _mp="$(uci -q get luci_statistics.roamer_listen.port || true)"; [ -z "$_mp" ] || printf 'MON_PORT=%s\n' "$_mp"
 }
 
 if [ "$DRY_RUN" = 1 ]; then
@@ -2125,6 +2399,7 @@ if [ "$ROLE" = ap ]; then
   if [ -f "$JOBPID" ] && kill -0 "$(cat "$JOBPID" 2>/dev/null)" 2>/dev/null; then
     kill "$(cat "$JOBPID")" 2>/dev/null || true; lg "stopped an earlier Roamer background job"; fi
   echo "applying|||switching over in 5 s" > "$STATEFILE"
+  if [ "$MONITORING" = yes ]; then mon_state pending; else rm -f "$MONSTATEFILE"; fi
   if [ "$AP_ADDR" = static ]; then RECONNECT="$AP_IP"; NEWADDR="$AP_IP"; else RECONNECT="$NAME.lan"; NEWADDR=dhcp; fi
   case "$CAB" in
     lan)    step1="No cable changes — the Gateway is already on a LAN port.";;
@@ -2163,7 +2438,7 @@ if [ "$ROLE" = ap ]; then
     alog() { echo "$(date +%T) $*"; logger -t roaming-setup "$*"; }
     st() { echo "$*" > "$STATEFILE"; }
     rollback() {
-      st "rolling-back|||$1"
+      st "rolling-back|||$1"; rm -f "$MONSTATEFILE"
       alog "ROLLING BACK ($1) to $SNAP"
       alt=""; gw_here=0; ping -c1 -W1 "$GW_IP" >/dev/null 2>&1 && gw_here=1
       for f in network dhcp wireless system; do cp "$SNAP/$f" /etc/config/$f; done
@@ -2245,6 +2520,8 @@ if [ "$ROLE" = ap ]; then
     fi
     st "ok|$NEWADDR||set up successfully"
     alog "Dumb AP is set up successfully: $(ip -4 -o addr show br-lan | awk '{print $4}' | tr '\n' ' ')"
+    # roaming is confirmed and the state says so: from here on nothing can roll it back
+    LOGTMP=""; mon_run
   ) &
   echo $! > "$JOBPID"
   exit 0
@@ -2287,6 +2564,7 @@ t=0; while [ $t -lt 20 ]; do
   pending=0; for r in $SEL; do [ -n "$(opchan "$r" || true)" ] || pending=1; done
   [ $pending = 0 ] && break; sleep 2; t=$((t+2))
 done
+if [ "$MONITORING" = yes ]; then step "Monitoring"; mon_run; pause; else rm -f "$MONSTATEFILE"; fi
 umask 077; mkpair 1 > "$PAIRFILE"
 CODE="(ucode missing — no pairing code)"; command -v ucode >/dev/null && CODE="ROAM1:$(b64e "$(cat "$PAIRFILE")")"
 chs=""; for r in $SEL; do chs="$chs $(uci -q get wireless.$r.band) ch $(opchan "$r" || echo '?')"; done
