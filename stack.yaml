@@ -1,0 +1,8 @@
+# Catalog ids from https://github.com/bitsn1per/tech-stack
+uses:
+  - openwrt-25.12
+  - openwrt-24.10
+  - alpine-3.20
+  - python-3.13
+  - shellcheck
+  - github-actions

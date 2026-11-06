@@ -3,6 +3,13 @@
 All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow `VERSION` in `roaming-setup.sh`.
 
+## [Unreleased]
+
+### Added
+
+- `stack.yaml`, listing the ids from the [tech-stack](https://github.com/bitsn1per/tech-stack)
+  catalog that this repo uses to build, test and run.
+
 ## [8.5] — 2026-10-21
 
 ### Fixed
